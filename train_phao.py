@@ -1,17 +1,5 @@
 #!/usr/bin/env python
 # coding=utf-8
-# Copyright 2022 The HuggingFace Inc. team. All rights reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
 
 import os
 import shutil
@@ -24,12 +12,11 @@ from dataclasses import dataclass, field
 from functools import partial
 from typing import Optional
 from transformers import (
-    AutoConfig, MaskFormerImageProcessor, MaskFormerForInstanceSegmentation, get_scheduler, HfArgumentParser, TrainingArguments
+    AutoConfig, MaskFormerImageProcessor, MaskFormerForInstanceSegmentation, get_scheduler, HfArgumentParser, TrainingArguments, Trainer
 )
 from torchvision.transforms import ColorJitter
 from datasets import load_dataset
 from peft import LoraConfig, get_peft_model
-from accelerate import Accelerator
 import wandb
 
 logger = logging.getLogger(__name__)
@@ -37,7 +24,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class DataTrainingArguments:
     dataset_name: Optional[str] = field(
-        default="Xkull/phao_resize",
+        default="Xkull/phao_resize",  # Tên dataset
         metadata={"help": "Name of the dataset to use."},
     )
     train_val_split: Optional[float] = field(
@@ -47,7 +34,7 @@ class DataTrainingArguments:
 @dataclass
 class ModelArguments:
     model_name_or_path: str = field(
-        default="facebook/maskformer-swin-base-ade",
+        default="facebook/maskformer-swin-base-ade",  # Model pretrained của Hugging Face
         metadata={"help": "Path to pretrained model or model identifier."},
     )
 
@@ -107,8 +94,6 @@ def main():
     parser = HfArgumentParser((ModelArguments, DataTrainingArguments, LoRAArguments, TrainingArguments))
     model_args, data_args, lora_args, training_args = parser.parse_args_into_dataclasses()
 
-    accelerator = Accelerator()
-
     # Load dataset
     ds = load_dataset(data_args.dataset_name, trust_remote_code=True)
     ds_split = ds["train"].train_test_split(test_size=data_args.train_val_split)
@@ -139,41 +124,22 @@ def main():
     train_ds.set_transform(lambda batch: train_transforms(batch, image_processor, jitter))
     test_ds.set_transform(lambda batch: train_transforms(batch, image_processor, jitter))
 
-    train_loader = DataLoader(train_ds, batch_size=training_args.per_device_train_batch_size, shuffle=True)
-    test_loader = DataLoader(test_ds, batch_size=training_args.per_device_eval_batch_size)
-
-    # Prepare optimizer and scheduler
-    optimizer = torch.optim.AdamW(model.parameters(), lr=training_args.learning_rate)
-    num_training_steps = len(train_loader) * training_args.num_train_epochs
-    lr_scheduler = get_scheduler("linear", optimizer=optimizer, num_warmup_steps=0, num_training_steps=num_training_steps)
-
-    # Prepare everything with Accelerator
-    model, optimizer, train_loader, test_loader = accelerator.prepare(
-        model, optimizer, train_loader, test_loader
+    # Prepare Trainer
+    trainer = Trainer(
+        model=model,
+        args=training_args,
+        train_dataset=train_ds,
+        eval_dataset=test_ds,
+        tokenizer=image_processor,
+        data_collator=None,
+        compute_metrics=None,  # You can add a metric calculation function here
     )
 
-    # Training loop
-    for epoch in range(training_args.num_train_epochs):
-        model.train()
-        for step, batch in enumerate(train_loader):
-            outputs = model(
-                pixel_values=batch["pixel_values"],
-                class_labels=batch["class_labels"],
-                mask_labels=batch["mask_labels"]
-            )
-            loss = outputs.loss
-            accelerator.backward(loss)
-            optimizer.step()
-            lr_scheduler.step()
-            optimizer.zero_grad()
+    # Training the model
+    trainer.train()
 
-            if step % training_args.logging_steps == 0:
-                logger.info(f"Epoch {epoch} Step {step}: Loss = {loss.item()}")
-
-    # Save model
-    accelerator.wait_for_everyone()
-    unwrapped_model = accelerator.unwrap_model(model)
-    unwrapped_model.save_pretrained(training_args.output_dir)
+    # Save the model
+    trainer.save_model(training_args.output_dir)
 
     # Compress results
     shutil.make_archive(training_args.output_dir, 'zip', training_args.output_dir)
