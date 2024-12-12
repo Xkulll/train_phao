@@ -11,6 +11,7 @@ from torch.utils.data import DataLoader
 from dataclasses import dataclass, field
 from functools import partial
 from typing import Optional
+from PIL import Image
 from transformers import (
     AutoConfig, MaskFormerImageProcessor, MaskFormerForInstanceSegmentation, get_scheduler, HfArgumentParser, TrainingArguments, Trainer
 )
