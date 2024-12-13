@@ -112,7 +112,7 @@ def main():
     config.num_labels = len(config.id2label)
 
     # Prepare the model
-    model = MaskFormerForInstanceSegmentation.from_pretrained(model_args.model_name_or_path, config=config)
+    model = MaskFormerForInstanceSegmentation.from_pretrained(model_args.model_name_or_path, config=config, ignore_mismatched_sizes=True)
 
     # Apply LoRA
     lora_config = LoraConfig(
