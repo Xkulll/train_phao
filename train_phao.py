@@ -132,7 +132,7 @@ def main():
 
     # Thêm ánh xạ nhãn
     label2id = {str(i): i for i in range(151)}
-    id2label = {i: str(i) for i in range(151)}
+    id2label = {i: str(i) for i in range(151)
     
     # Thêm nhãn "phao"
     label2id["phao"] = 150
