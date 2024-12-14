@@ -71,6 +71,7 @@ def train_transforms(example_batch, image_processor, jitter, device):
     padded_labels = pad_to_max_classes(labels)  # Pad labels to match the max size in the batch
     inputs = image_processor(images, padded_labels)
 
+    # Padding class labels
     max_class_size = max(label.shape[0] for label in inputs["class_labels"])
     padded_class_labels = [
         F.pad(torch.tensor(label), (0, max_class_size - label.shape[0]), "constant", 0)
@@ -78,6 +79,7 @@ def train_transforms(example_batch, image_processor, jitter, device):
         for label in inputs["class_labels"]
     ]
 
+    # Padding mask labels
     max_mask_classes = max(mask.shape[0] for mask in inputs["mask_labels"])
     padded_mask_labels = [
         F.pad(torch.tensor(mask), (0, 0, 0, 0, 0, max_mask_classes - mask.shape[0]), "constant", 0)
@@ -85,10 +87,15 @@ def train_transforms(example_batch, image_processor, jitter, device):
         for mask in inputs["mask_labels"]
     ]
 
-    # Ensure all tensors are padded to the same size
-    pixel_values = torch.stack([torch.tensor(image).to(device) for image in inputs["pixel_values"]])
-    class_labels = torch.stack([torch.tensor(label).to(device) for label in padded_class_labels])
-    mask_labels = torch.stack([torch.tensor(mask).to(device) for mask in padded_mask_labels])
+    # Ensure tensors are on the CPU before pinning
+    pixel_values = torch.stack([torch.tensor(image) for image in inputs["pixel_values"]])
+    class_labels = torch.stack([torch.tensor(label) for label in padded_class_labels])
+    mask_labels = torch.stack([torch.tensor(mask) for mask in padded_mask_labels])
+
+    # Move tensors to GPU after creation (if needed)
+    pixel_values = pixel_values.to(device)
+    class_labels = class_labels.to(device)
+    mask_labels = mask_labels.to(device)
 
     return {
         "pixel_values": pixel_values,
@@ -102,6 +109,7 @@ def val_transforms(example_batch, image_processor, jitter, device):
     padded_labels = pad_to_max_classes(labels)
     inputs = image_processor(images, padded_labels)
 
+    # Padding class labels
     max_class_size = max(label.shape[0] for label in inputs["class_labels"])
     padded_class_labels = [
         F.pad(torch.tensor(label), (0, max_class_size - label.shape[0]), "constant", 0)
@@ -109,6 +117,7 @@ def val_transforms(example_batch, image_processor, jitter, device):
         for label in inputs["class_labels"]
     ]
 
+    # Padding mask labels
     max_mask_classes = max(mask.shape[0] for mask in inputs["mask_labels"])
     padded_mask_labels = [
         F.pad(torch.tensor(mask), (0, 0, 0, 0, 0, max_mask_classes - mask.shape[0]), "constant", 0)
@@ -116,16 +125,22 @@ def val_transforms(example_batch, image_processor, jitter, device):
         for mask in inputs["mask_labels"]
     ]
 
-    # Ensure all tensors are padded to the same size
-    pixel_values = torch.stack([torch.tensor(image).to(device) for image in inputs["pixel_values"]])
-    class_labels = torch.stack([torch.tensor(label).to(device) for label in padded_class_labels])
-    mask_labels = torch.stack([torch.tensor(mask).to(device) for mask in padded_mask_labels])
+    # Ensure tensors are on the CPU before pinning
+    pixel_values = torch.stack([torch.tensor(image) for image in inputs["pixel_values"]])
+    class_labels = torch.stack([torch.tensor(label) for label in padded_class_labels])
+    mask_labels = torch.stack([torch.tensor(mask) for mask in padded_mask_labels])
+
+    # Move tensors to GPU after creation (if needed)
+    pixel_values = pixel_values.to(device)
+    class_labels = class_labels.to(device)
+    mask_labels = mask_labels.to(device)
 
     return {
         "pixel_values": pixel_values,
         "class_labels": class_labels,
         "mask_labels": mask_labels,
     }
+
 
 
 def main():
