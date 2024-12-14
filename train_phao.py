@@ -128,7 +128,11 @@ def val_transforms(example_batch, image_processor, jitter, device):
 
 def main():
     wandb.login(key="dcbb2d83e7e9431017ffed03bf30841e0321e1b5")
+
+    # Define device before any model-related operations
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
+    # Parse arguments
     parser = HfArgumentParser((ModelArguments, DataTrainingArguments, LoRAArguments, TrainingArguments))
     model_args, data_args, lora_args, training_args = parser.parse_args_into_dataclasses()
 
@@ -137,16 +141,15 @@ def main():
         datefmt="%m/%d/%Y %H:%M:%S",
         handlers=[logging.StreamHandler(sys.stdout)],
     )
+    
     # Load dataset
     ds = load_dataset(data_args.dataset_name, trust_remote_code=True)
     ds_split = ds["train"].train_test_split(test_size=data_args.train_val_split)
     train_ds, test_ds = ds_split["train"], ds_split["test"]
 
-    # Thêm ánh xạ nhãn
+    # Label mapping
     label2id = {str(i): i for i in range(151)}
     id2label = {i: str(i) for i in range(151)}
-    
-    # Thêm nhãn "phao"
     label2id["phao"] = 150
     id2label[150] = "phao"
 
@@ -157,29 +160,35 @@ def main():
         id2label=id2label, 
         num_labels=len(id2label)
     )
-    
+
     image_processor = MaskFormerImageProcessor.from_pretrained(model_args.model_name_or_path)
     jitter = ColorJitter(brightness=0.25, contrast=0.25, saturation=0.25, hue=0.1)
 
-    # Prepare the model
+    # Load the pre-trained model
     model = MaskFormerForInstanceSegmentation.from_pretrained(model_args.model_name_or_path, config=config, ignore_mismatched_sizes=True)
+
+    # If using multiple GPUs, apply DataParallel
     if torch.cuda.device_count() > 1:
         print(f"Using {torch.cuda.device_count()} GPUs")
         model = nn.DataParallel(model)
-    model = model.to(device)
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     # Apply LoRA
     lora_config = LoraConfig(
-        r=lora_args.r, lora_alpha=lora_args.lora_alpha, target_modules=["query", "value"],
-        lora_dropout=lora_args.lora_dropout, bias="lora_only", modules_to_save=["decode_head"]
+        r=lora_args.r, 
+        lora_alpha=lora_args.lora_alpha, 
+        target_modules=["query", "value"],
+        lora_dropout=lora_args.lora_dropout, 
+        bias="lora_only", 
+        modules_to_save=["decode_head"]
     )
     lora_model = get_peft_model(model, lora_config)
 
+    # Move the model to the device (after initializing LoRA model)
     lora_model = lora_model.to(device)
+
     # Preprocessing datasets
-    train_ds.set_transform(lambda batch: train_transforms(batch, image_processor, jitter))
-    test_ds.set_transform(lambda batch: train_transforms(batch, image_processor, jitter))
+    train_ds.set_transform(lambda batch: train_transforms(batch, image_processor, jitter, device))
+    test_ds.set_transform(lambda batch: val_transforms(batch, image_processor, jitter, device))
 
     # Prepare Trainer
     trainer = Trainer(
