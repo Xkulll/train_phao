@@ -167,6 +167,8 @@ def main():
         print(f"Using {torch.cuda.device_count()} GPUs")
         model = nn.DataParallel(model)
     model = model.to(device)
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     # Apply LoRA
     lora_config = LoraConfig(
         r=lora_args.r, lora_alpha=lora_args.lora_alpha, target_modules=["query", "value"],
@@ -174,8 +176,7 @@ def main():
     )
     lora_model = get_peft_model(model, lora_config)
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = lora_model.to(device)
+    lora_model = lora_model.to(device)
     # Preprocessing datasets
     train_ds.set_transform(lambda batch: train_transforms(batch, image_processor, jitter))
     test_ds.set_transform(lambda batch: train_transforms(batch, image_processor, jitter))
