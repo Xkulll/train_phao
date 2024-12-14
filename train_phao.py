@@ -8,6 +8,7 @@ import sys
 import numpy as np
 import torch
 import torch.nn.functional as F
+from torchvision import transforms as T
 from torch.utils.data import DataLoader
 from dataclasses import dataclass, field
 from functools import partial
@@ -67,9 +68,16 @@ def pad_to_max_classes(batch_labels):
 
 # Transform function for training
 def train_transforms(example_batch, image_processor, jitter, device):
-    images = [jitter(handle_grayscale_image(x)) for x in example_batch["image"]]
-    labels = [torch.tensor(x) for x in example_batch["annotation"]]
-    padded_labels = pad_to_max_classes(labels)  # Pad labels to match the max size in the batch
+    to_tensor = T.ToTensor()  # Chuyển ảnh PIL sang tensor
+    images = [to_tensor(jitter(handle_grayscale_image(x))) for x in example_batch["image"]]
+
+    # Chuyển annotation thành tensor
+    labels = [
+        torch.tensor(np.array(x), dtype=torch.float32) if isinstance(x, np.ndarray) 
+        else torch.tensor(x, dtype=torch.float32)
+        for x in example_batch["annotation"]
+    ]
+    padded_labels = pad_to_max_classes(labels)  # Pad labels để đảm bảo batch đồng nhất
     inputs = image_processor(images, padded_labels)
 
     # Padding class labels
@@ -89,11 +97,11 @@ def train_transforms(example_batch, image_processor, jitter, device):
     ]
 
     # Ensure tensors are on CPU before pinning
-    pixel_values = torch.stack([image for image in inputs["pixel_values"]]).cpu()
-    class_labels = torch.stack([label for label in padded_class_labels]).cpu()
-    mask_labels = torch.stack([mask for mask in padded_mask_labels]).cpu()
+    pixel_values = torch.stack(inputs["pixel_values"]).cpu()
+    class_labels = torch.stack(padded_class_labels).cpu()
+    mask_labels = torch.stack(padded_mask_labels).cpu()
 
-    # Move tensors to GPU after they are created (if needed)
+    # Move tensors to GPU after they are created (if cần thiết)
     pixel_values = pixel_values.to(device)
     class_labels = class_labels.to(device)
     mask_labels = mask_labels.to(device)
@@ -103,12 +111,18 @@ def train_transforms(example_batch, image_processor, jitter, device):
         "class_labels": class_labels,
         "mask_labels": mask_labels,
     }
-
 # Transform function for validation
 def val_transforms(example_batch, image_processor, jitter, device):
-    images = [handle_grayscale_image(x) for x in example_batch["image"]]
-    labels = [torch.tensor(x) for x in example_batch["annotation"]]
-    padded_labels = pad_to_max_classes(labels)
+    to_tensor = T.ToTensor()  # Chuyển ảnh PIL sang tensor
+    images = [to_tensor(jitter(handle_grayscale_image(x))) for x in example_batch["image"]]
+
+    # Chuyển annotation thành tensor
+    labels = [
+        torch.tensor(np.array(x), dtype=torch.float32) if isinstance(x, np.ndarray) 
+        else torch.tensor(x, dtype=torch.float32)
+        for x in example_batch["annotation"]
+    ]
+    padded_labels = pad_to_max_classes(labels)  # Pad labels để đảm bảo batch đồng nhất
     inputs = image_processor(images, padded_labels)
 
     # Padding class labels
@@ -128,11 +142,11 @@ def val_transforms(example_batch, image_processor, jitter, device):
     ]
 
     # Ensure tensors are on CPU before pinning
-    pixel_values = torch.stack([image for image in inputs["pixel_values"]]).cpu()
-    class_labels = torch.stack([label for label in padded_class_labels]).cpu()
-    mask_labels = torch.stack([mask for mask in padded_mask_labels]).cpu()
+    pixel_values = torch.stack(inputs["pixel_values"]).cpu()
+    class_labels = torch.stack(padded_class_labels).cpu()
+    mask_labels = torch.stack(padded_mask_labels).cpu()
 
-    # Move tensors to GPU after they are created (if needed)
+    # Move tensors to GPU after they are created (if cần thiết)
     pixel_values = pixel_values.to(device)
     class_labels = class_labels.to(device)
     mask_labels = mask_labels.to(device)
