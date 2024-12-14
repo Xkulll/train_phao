@@ -123,6 +123,8 @@ def val_transforms(example_batch):
     }
 
 def main():
+    wandb.login(key="dcbb2d83e7e9431017ffed03bf30841e0321e1b5")
+    
     parser = HfArgumentParser((ModelArguments, DataTrainingArguments, LoRAArguments, TrainingArguments))
     model_args, data_args, lora_args, training_args = parser.parse_args_into_dataclasses()
 
