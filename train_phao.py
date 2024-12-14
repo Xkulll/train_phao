@@ -165,7 +165,10 @@ def main():
 
     # Prepare the model
     model = MaskFormerForInstanceSegmentation.from_pretrained(model_args.model_name_or_path, config=config, ignore_mismatched_sizes=True)
-
+    if torch.cuda.device_count() > 1:
+        print(f"Using {torch.cuda.device_count()} GPUs")
+        model = nn.DataParallel(model)
+    model = model.to(device)
     # Apply LoRA
     lora_config = LoraConfig(
         r=lora_args.r, lora_alpha=lora_args.lora_alpha, target_modules=["query", "value"],
