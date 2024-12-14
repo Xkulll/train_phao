@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from functools import partial
 from typing import Optional
 from PIL import Image
+from torch import nn
 from transformers import (
     AutoConfig, MaskFormerImageProcessor, MaskFormerForInstanceSegmentation, get_scheduler, HfArgumentParser, TrainingArguments, Trainer
 )
@@ -90,6 +91,35 @@ def train_transforms(example_batch, image_processor, jitter):
         "class_labels": torch.stack(padded_class_labels),
         "mask_labels": torch.stack(padded_mask_labels),
     }
+    
+def val_transforms(example_batch):
+    images = [handle_grayscale_image(x) for x in example_batch["image"]]
+    labels = [np.array(x) for x in example_batch["annotation"]]
+    padded_labels = pad_to_max_classes(labels)
+    inputs = image_processor(images, padded_labels)
+
+    max_class_size = max(label.shape[0] for label in inputs["class_labels"])
+    padded_class_labels = [
+        F.pad(torch.tensor(label), (0, max_class_size - label.shape[0]), "constant", 0)
+        if label.shape[0] < max_class_size else torch.tensor(label)
+        for label in inputs["class_labels"]
+    ]
+
+    max_mask_classes = max(mask.shape[0] for mask in inputs["mask_labels"])
+    padded_mask_labels = [
+        F.pad(torch.tensor(mask), (0, 0, 0, 0, 0, max_mask_classes - mask.shape[0]), "constant", 0)
+        if mask.shape[0] < max_mask_classes else torch.tensor(mask)
+        for mask in inputs["mask_labels"]
+    ]
+
+    # Convert `pixel_values` to PyTorch tensors
+    pixel_values = torch.stack([torch.tensor(image) for image in inputs["pixel_values"]])
+
+    return {
+        "pixel_values": pixel_values,
+        "class_labels": torch.stack(padded_class_labels),
+        "mask_labels": torch.stack(padded_mask_labels),
+    }
 
 def main():
     parser = HfArgumentParser((ModelArguments, DataTrainingArguments, LoRAArguments, TrainingArguments))
@@ -101,7 +131,7 @@ def main():
     train_ds, test_ds = ds_split["train"], ds_split["test"]
 
     # Model and processor configuration
-    config = AutoConfig.from_pretrained(model_args.model_name_or_path)
+    config = AutoConfig.from_pretrained(model_args.model_name_or_path, label2id=label2id, id2label=id2label, num_labels=len(id2label))
     image_processor = MaskFormerImageProcessor.from_pretrained(model_args.model_name_or_path)
     jitter = ColorJitter(brightness=0.25, contrast=0.25, saturation=0.25, hue=0.1)
 
@@ -119,7 +149,7 @@ def main():
         r=lora_args.r, lora_alpha=lora_args.lora_alpha, target_modules=["query", "value"],
         lora_dropout=lora_args.lora_dropout, bias="lora_only", modules_to_save=["decode_head"]
     )
-    model = get_peft_model(model, lora_config)
+    lora_model = get_peft_model(model, lora_config)
 
     # Preprocessing datasets
     train_ds.set_transform(lambda batch: train_transforms(batch, image_processor, jitter))
@@ -127,7 +157,7 @@ def main():
 
     # Prepare Trainer
     trainer = Trainer(
-        model=model,
+        model=lora_model,
         args=training_args,
         train_dataset=train_ds,
         eval_dataset=test_ds,
@@ -137,13 +167,13 @@ def main():
     )
 
     # Training the model
-    trainer.train()
+    train_result = trainer.train()
 
     # Save the model
-    trainer.save_model(training_args.output_dir)
+    trainer.save_model(train_result.output_dir)
 
     # Compress results
-    shutil.make_archive(training_args.output_dir, 'zip', training_args.output_dir)
+    shutil.make_archive(train_result.output_dir, 'zip', train_result.output_dir)
 
 if __name__ == "__main__":
     main()
