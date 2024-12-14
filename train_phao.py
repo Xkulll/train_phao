@@ -130,8 +130,19 @@ def main():
     ds_split = ds["train"].train_test_split(test_size=data_args.train_val_split)
     train_ds, test_ds = ds_split["train"], ds_split["test"]
 
+    label2id = {str(i): i for i in range(151)}
+    id2label = {i: str(i) for i in range(151)
+    
+    label2id["phao"] = 150
+    id2label[150] = "phao"
     # Model and processor configuration
-    config = AutoConfig.from_pretrained(model_args.model_name_or_path, label2id=label2id, id2label=id2label, num_labels=len(id2label))
+    config = AutoConfig.from_pretrained(
+        model_args.model_name_or_path, 
+        label2id=label2id, 
+        id2label=id2label, 
+        num_labels=len(id2label)
+    )
+    
     image_processor = MaskFormerImageProcessor.from_pretrained(model_args.model_name_or_path)
     jitter = ColorJitter(brightness=0.25, contrast=0.25, saturation=0.25, hue=0.1)
 
