@@ -149,12 +149,6 @@ def main():
     image_processor = MaskFormerImageProcessor.from_pretrained(model_args.model_name_or_path)
     jitter = ColorJitter(brightness=0.25, contrast=0.25, saturation=0.25, hue=0.1)
 
-    # Add custom label for "phao"
-    if 150 not in config.id2label:
-        config.id2label[150] = "phao"
-        config.label2id["phao"] = 150
-    config.num_labels = len(config.id2label)
-
     # Prepare the model
     model = MaskFormerForInstanceSegmentation.from_pretrained(model_args.model_name_or_path, config=config, ignore_mismatched_sizes=True)
 
