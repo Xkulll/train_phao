@@ -46,7 +46,14 @@ class LoRAArguments:
     r: int = field(default=32, metadata={"help": "Rank of the LoRA update matrices."})
     lora_alpha: int = field(default=32, metadata={"help": "Alpha scaling factor for LoRA."})
     lora_dropout: float = field(default=0.1, metadata={"help": "Dropout rate for LoRA layers."})
-
+    
+def handle_grayscale_image(image):
+    np_image = np.array(image)
+    if np_image.ndim == 2:  # Convert grayscale to RGB
+        tiled_image = np.tile(np.expand_dims(np_image, -1), 3)
+        return Image.fromarray(tiled_image)
+    return Image.fromarray(np_image)
+    
 def pad_to_max_classes(batch_labels):
     max_classes = max(label.shape[0] for label in batch_labels)  # Find max size for labels
     padded_labels = []
