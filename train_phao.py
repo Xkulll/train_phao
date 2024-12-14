@@ -196,8 +196,7 @@ def main():
         args=training_args,
         train_dataset=train_ds,
         eval_dataset=test_ds,
-        tokenizer=image_processor,
-        data_parallel=True,
+        tokenizer=image_processor,  # Deprecated warning here, but will work
         data_collator=None,
         compute_metrics=None,  # You can add a metric calculation function here
     )
@@ -210,6 +209,7 @@ def main():
 
     # Compress results
     shutil.make_archive(train_result.output_dir, 'zip', train_result.output_dir)
+
 
 if __name__ == "__main__":
     main()
