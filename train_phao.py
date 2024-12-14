@@ -125,6 +125,11 @@ def main():
     parser = HfArgumentParser((ModelArguments, DataTrainingArguments, LoRAArguments, TrainingArguments))
     model_args, data_args, lora_args, training_args = parser.parse_args_into_dataclasses()
 
+    logging.basicConfig(
+        format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
+        datefmt="%m/%d/%Y %H:%M:%S",
+        handlers=[logging.StreamHandler(sys.stdout)],
+    )
     # Load dataset
     ds = load_dataset(data_args.dataset_name, trust_remote_code=True)
     ds_split = ds["train"].train_test_split(test_size=data_args.train_val_split)
