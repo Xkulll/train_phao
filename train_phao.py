@@ -47,15 +47,8 @@ class LoRAArguments:
     lora_alpha: int = field(default=32, metadata={"help": "Alpha scaling factor for LoRA."})
     lora_dropout: float = field(default=0.1, metadata={"help": "Dropout rate for LoRA layers."})
 
-def handle_grayscale_image(image):
-    np_image = np.array(image)
-    if np_image.ndim == 2:  # Convert grayscale to RGB
-        tiled_image = np.tile(np.expand_dims(np_image, -1), 3)
-        return Image.fromarray(tiled_image)
-    return Image.fromarray(np_image)
-
 def pad_to_max_classes(batch_labels):
-    max_classes = max(label.shape[0] for label in batch_labels)
+    max_classes = max(label.shape[0] for label in batch_labels)  # Find max size for labels
     padded_labels = []
     for label in batch_labels:
         if label.shape[0] < max_classes:
@@ -68,7 +61,7 @@ def pad_to_max_classes(batch_labels):
 def train_transforms(example_batch, image_processor, jitter, device):
     images = [jitter(handle_grayscale_image(x)) for x in example_batch["image"]]
     labels = [np.array(x) for x in example_batch["annotation"]]
-    padded_labels = pad_to_max_classes(labels)
+    padded_labels = pad_to_max_classes(labels)  # Pad labels to match the max size in the batch
     inputs = image_processor(images, padded_labels)
 
     max_class_size = max(label.shape[0] for label in inputs["class_labels"])
@@ -85,16 +78,17 @@ def train_transforms(example_batch, image_processor, jitter, device):
         for mask in inputs["mask_labels"]
     ]
 
+    # Ensure all tensors are padded to the same size
     pixel_values = torch.stack([torch.tensor(image).to(device) for image in inputs["pixel_values"]])
-    class_labels = torch.stack([torch.tensor(label).to(device) for label in inputs["class_labels"]])
-    mask_labels = torch.stack([torch.tensor(mask).to(device) for mask in inputs["mask_labels"]])
+    class_labels = torch.stack([torch.tensor(label).to(device) for label in padded_class_labels])
+    mask_labels = torch.stack([torch.tensor(mask).to(device) for mask in padded_mask_labels])
 
     return {
         "pixel_values": pixel_values,
         "class_labels": class_labels,
         "mask_labels": mask_labels,
     }
-    
+
 def val_transforms(example_batch, image_processor, jitter, device):
     images = [handle_grayscale_image(x) for x in example_batch["image"]]
     labels = [np.array(x) for x in example_batch["annotation"]]
@@ -115,16 +109,17 @@ def val_transforms(example_batch, image_processor, jitter, device):
         for mask in inputs["mask_labels"]
     ]
 
-    # Convert `pixel_values` to PyTorch tensors
+    # Ensure all tensors are padded to the same size
     pixel_values = torch.stack([torch.tensor(image).to(device) for image in inputs["pixel_values"]])
-    class_labels = torch.stack([torch.tensor(label).to(device) for label in inputs["class_labels"]])
-    mask_labels = torch.stack([torch.tensor(mask).to(device) for mask in inputs["mask_labels"]])
+    class_labels = torch.stack([torch.tensor(label).to(device) for label in padded_class_labels])
+    mask_labels = torch.stack([torch.tensor(mask).to(device) for mask in padded_mask_labels])
 
     return {
         "pixel_values": pixel_values,
         "class_labels": class_labels,
         "mask_labels": mask_labels,
     }
+
 
 def main():
     wandb.login(key="dcbb2d83e7e9431017ffed03bf30841e0321e1b5")
