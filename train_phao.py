@@ -187,6 +187,7 @@ def main():
         train_dataset=train_ds,
         eval_dataset=test_ds,
         tokenizer=image_processor,
+        data_parallel=True,
         data_collator=None,
         compute_metrics=None,  # You can add a metric calculation function here
     )
