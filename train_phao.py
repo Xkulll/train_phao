@@ -23,8 +23,6 @@ from peft import LoraConfig, get_peft_model
 import wandb
 
 logger = logging.getLogger(__name__)
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-model = lora_model.to(device)
 
 @dataclass
 class DataTrainingArguments:
@@ -176,6 +174,8 @@ def main():
     )
     lora_model = get_peft_model(model, lora_config)
 
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = lora_model.to(device)
     # Preprocessing datasets
     train_ds.set_transform(lambda batch: train_transforms(batch, image_processor, jitter))
     test_ds.set_transform(lambda batch: train_transforms(batch, image_processor, jitter))
