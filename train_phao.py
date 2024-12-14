@@ -23,6 +23,8 @@ from peft import LoraConfig, get_peft_model
 import wandb
 
 logger = logging.getLogger(__name__)
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+model = lora_model.to(device)
 
 @dataclass
 class DataTrainingArguments:
@@ -65,7 +67,7 @@ def pad_to_max_classes(batch_labels):
             padded_labels.append(label)
     return padded_labels
 
-def train_transforms(example_batch, image_processor, jitter):
+def train_transforms(example_batch, image_processor, jitter, device):
     images = [jitter(handle_grayscale_image(x)) for x in example_batch["image"]]
     labels = [np.array(x) for x in example_batch["annotation"]]
     padded_labels = pad_to_max_classes(labels)
@@ -85,15 +87,17 @@ def train_transforms(example_batch, image_processor, jitter):
         for mask in inputs["mask_labels"]
     ]
 
-    pixel_values = torch.stack([torch.tensor(image) for image in inputs["pixel_values"]])
+    pixel_values = torch.stack([torch.tensor(image).to(device) for image in inputs["pixel_values"]])
+    class_labels = torch.stack([torch.tensor(label).to(device) for label in inputs["class_labels"]])
+    mask_labels = torch.stack([torch.tensor(mask).to(device) for mask in inputs["mask_labels"]])
 
     return {
         "pixel_values": pixel_values,
-        "class_labels": torch.stack(padded_class_labels),
-        "mask_labels": torch.stack(padded_mask_labels),
+        "class_labels": class_labels,
+        "mask_labels": mask_labels,
     }
     
-def val_transforms(example_batch):
+def val_transforms(example_batch, image_processor, jitter, device):
     images = [handle_grayscale_image(x) for x in example_batch["image"]]
     labels = [np.array(x) for x in example_batch["annotation"]]
     padded_labels = pad_to_max_classes(labels)
@@ -114,12 +118,14 @@ def val_transforms(example_batch):
     ]
 
     # Convert `pixel_values` to PyTorch tensors
-    pixel_values = torch.stack([torch.tensor(image) for image in inputs["pixel_values"]])
+    pixel_values = torch.stack([torch.tensor(image).to(device) for image in inputs["pixel_values"]])
+    class_labels = torch.stack([torch.tensor(label).to(device) for label in inputs["class_labels"]])
+    mask_labels = torch.stack([torch.tensor(mask).to(device) for mask in inputs["mask_labels"]])
 
     return {
         "pixel_values": pixel_values,
-        "class_labels": torch.stack(padded_class_labels),
-        "mask_labels": torch.stack(padded_mask_labels),
+        "class_labels": class_labels,
+        "mask_labels": mask_labels,
     }
 
 def main():
