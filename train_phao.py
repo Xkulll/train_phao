@@ -8,7 +8,7 @@ import sys
 import numpy as np
 import torch
 import torch.nn.functional as F
-from torchvision import transforms as T
+import torchvision.transforms as T
 from torch.utils.data import DataLoader
 from dataclasses import dataclass, field
 from functools import partial
@@ -22,6 +22,7 @@ from torchvision.transforms import ColorJitter
 from datasets import load_dataset
 from peft import LoraConfig, get_peft_model
 import wandb
+from accelerate import Accelerator
 
 logger = logging.getLogger(__name__)
 
@@ -47,16 +48,33 @@ class LoRAArguments:
     r: int = field(default=32, metadata={"help": "Rank of the LoRA update matrices."})
     lora_alpha: int = field(default=32, metadata={"help": "Alpha scaling factor for LoRA."})
     lora_dropout: float = field(default=0.1, metadata={"help": "Dropout rate for LoRA layers."})
-    
+
+# Define function for grayscale image processing
+
 def handle_grayscale_image(image):
+    # Chuyển đổi ảnh từ PIL Image thành NumPy array
     np_image = np.array(image)
-    if np_image.ndim == 2:  # Convert grayscale to RGB
-        tiled_image = np.tile(np.expand_dims(np_image, -1), 3)
-        return Image.fromarray(tiled_image)
-    return Image.fromarray(np_image)
     
+    # Kiểm tra nếu ảnh là ảnh grayscale (2D array)
+    if np_image.ndim == 2:
+        # Nếu là ảnh grayscale, chuyển đổi thành ảnh RGB giả
+        np_image = np.expand_dims(np_image, axis=-1)  # Thêm chiều kênh màu
+        np_image = np.tile(np_image, (1, 1, 3))  # Tạo ảnh RGB giả
+    
+    # Chuyển đổi NumPy array thành tensor PyTorch
+    tensor_image = torch.from_numpy(np_image).float()
+    
+    # Chuẩn hóa giá trị pixel từ 0-255 thành khoảng [0, 1]
+    tensor_image = tensor_image / 255.0
+    
+    # Đảm bảo tensor có dạng (C, H, W)
+    tensor_image = tensor_image.permute(2, 0, 1)
+    
+    return tensor_image
+
+
 def pad_to_max_classes(batch_labels):
-    max_classes = max(label.shape[0] for label in batch_labels)  # Find max size for labels
+    max_classes = max(label.shape[0] for label in batch_labels)
     padded_labels = []
     for label in batch_labels:
         if label.shape[0] < max_classes:
@@ -66,106 +84,51 @@ def pad_to_max_classes(batch_labels):
             padded_labels.append(label)
     return padded_labels
 
-# Transform function for training
+# Function to process batches
+def process_example_batch(example_batch, image_processor, jitter, is_train=True):
+    images = [jitter(handle_grayscale_image(x)) for x in example_batch["image"]] if is_train else [handle_grayscale_image(x) for x in example_batch["image"]]
+    labels = [torch.tensor(np.array(x)) for x in example_batch["annotation"]]  # Chuyển nhãn thành tensor
+    padded_labels = pad_to_max_classes(labels)
+    inputs = image_processor(images, padded_labels)
+
+    max_class_size = max(label.shape[0] for label in inputs["class_labels"])
+    padded_class_labels = [
+        F.pad(label, (0, max_class_size - label.shape[0]), "constant", 0)
+        if label.shape[0] < max_class_size else label
+        for label in inputs["class_labels"]
+    ]
+
+    max_mask_classes = max(mask.shape[0] for mask in inputs["mask_labels"])
+    padded_mask_labels = [
+        F.pad(mask, (0, 0, 0, 0, 0, max_mask_classes - mask.shape[0]), "constant", 0)
+        if mask.shape[0] < max_mask_classes else mask
+        for mask in inputs["mask_labels"]
+    ]
+
+    pixel_values = torch.stack([torch.tensor(image) for image in inputs["pixel_values"]])
+
+    return {
+        "pixel_values": pixel_values,
+        "class_labels": torch.stack(padded_class_labels),
+        "mask_labels": torch.stack(padded_mask_labels),
+    }
+
+# Define train and validation transforms
 def train_transforms(example_batch, image_processor, jitter, device):
-    to_tensor = T.ToTensor()  # Chuyển ảnh PIL sang tensor
-    images = [to_tensor(jitter(handle_grayscale_image(x))) for x in example_batch["image"]]
+    return process_example_batch(example_batch, image_processor, jitter, is_train=True)
 
-    # Chuyển annotation thành tensor
-    labels = [
-        torch.tensor(np.array(x), dtype=torch.float32) if isinstance(x, np.ndarray) 
-        else torch.tensor(x, dtype=torch.float32)
-        for x in example_batch["annotation"]
-    ]
-    padded_labels = pad_to_max_classes(labels)  # Pad labels để đảm bảo batch đồng nhất
-    inputs = image_processor(images, padded_labels)
-
-    # Padding class labels
-    max_class_size = max(label.shape[0] for label in inputs["class_labels"])
-    padded_class_labels = [
-        F.pad(label, (0, max_class_size - label.shape[0]), "constant", 0)
-        if label.shape[0] < max_class_size else label
-        for label in inputs["class_labels"]
-    ]
-
-    # Padding mask labels
-    max_mask_classes = max(mask.shape[0] for mask in inputs["mask_labels"])
-    padded_mask_labels = [
-        F.pad(mask, (0, 0, 0, 0, 0, max_mask_classes - mask.shape[0]), "constant", 0)
-        if mask.shape[0] < max_mask_classes else mask
-        for mask in inputs["mask_labels"]
-    ]
-
-    # Ensure tensors are on CPU before pinning
-    pixel_values = torch.stack(inputs["pixel_values"]).cpu()
-    class_labels = torch.stack(padded_class_labels).cpu()
-    mask_labels = torch.stack(padded_mask_labels).cpu()
-
-    # Move tensors to GPU after they are created (if cần thiết)
-    pixel_values = pixel_values.to(device)
-    class_labels = class_labels.to(device)
-    mask_labels = mask_labels.to(device)
-
-    return {
-        "pixel_values": pixel_values,
-        "class_labels": class_labels,
-        "mask_labels": mask_labels,
-    }
-# Transform function for validation
 def val_transforms(example_batch, image_processor, jitter, device):
-    to_tensor = T.ToTensor()  # Chuyển ảnh PIL sang tensor
-    images = [to_tensor(jitter(handle_grayscale_image(x))) for x in example_batch["image"]]
-
-    # Chuyển annotation thành tensor
-    labels = [
-        torch.tensor(np.array(x), dtype=torch.float32) if isinstance(x, np.ndarray) 
-        else torch.tensor(x, dtype=torch.float32)
-        for x in example_batch["annotation"]
-    ]
-    padded_labels = pad_to_max_classes(labels)  # Pad labels để đảm bảo batch đồng nhất
-    inputs = image_processor(images, padded_labels)
-
-    # Padding class labels
-    max_class_size = max(label.shape[0] for label in inputs["class_labels"])
-    padded_class_labels = [
-        F.pad(label, (0, max_class_size - label.shape[0]), "constant", 0)
-        if label.shape[0] < max_class_size else label
-        for label in inputs["class_labels"]
-    ]
-
-    # Padding mask labels
-    max_mask_classes = max(mask.shape[0] for mask in inputs["mask_labels"])
-    padded_mask_labels = [
-        F.pad(mask, (0, 0, 0, 0, 0, max_mask_classes - mask.shape[0]), "constant", 0)
-        if mask.shape[0] < max_mask_classes else mask
-        for mask in inputs["mask_labels"]
-    ]
-
-    # Ensure tensors are on CPU before pinning
-    pixel_values = torch.stack(inputs["pixel_values"]).cpu()
-    class_labels = torch.stack(padded_class_labels).cpu()
-    mask_labels = torch.stack(padded_mask_labels).cpu()
-
-    # Move tensors to GPU after they are created (if cần thiết)
-    pixel_values = pixel_values.to(device)
-    class_labels = class_labels.to(device)
-    mask_labels = mask_labels.to(device)
-
-    return {
-        "pixel_values": pixel_values,
-        "class_labels": class_labels,
-        "mask_labels": mask_labels,
-    }
-
-
+    return process_example_batch(example_batch, image_processor, jitter, is_train=False)
 
 
 def main():
     wandb.login(key="dcbb2d83e7e9431017ffed03bf30841e0321e1b5")
 
-    # Define device before any model-related operations
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    
+    # Khởi tạo Accelerator để sử dụng nhiều GPU
+    accelerator = Accelerator()
+
+    device = accelerator.device  # Sử dụng thiết bị đã được accelerate chuẩn bị
+
     # Parse arguments
     parser = HfArgumentParser((ModelArguments, DataTrainingArguments, LoRAArguments, TrainingArguments))
     model_args, data_args, lora_args, training_args = parser.parse_args_into_dataclasses()
@@ -175,7 +138,7 @@ def main():
         datefmt="%m/%d/%Y %H:%M:%S",
         handlers=[logging.StreamHandler(sys.stdout)],
     )
-    
+
     # Load dataset
     ds = load_dataset(data_args.dataset_name, trust_remote_code=True)
     ds_split = ds["train"].train_test_split(test_size=data_args.train_val_split)
@@ -201,11 +164,6 @@ def main():
     # Load the pre-trained model
     model = MaskFormerForInstanceSegmentation.from_pretrained(model_args.model_name_or_path, config=config, ignore_mismatched_sizes=True)
 
-    # If using multiple GPUs, apply DataParallel
-    if torch.cuda.device_count() > 1:
-        print(f"Using {torch.cuda.device_count()} GPUs")
-        model = nn.DataParallel(model)
-
     # Apply LoRA
     lora_config = LoraConfig(
         r=lora_args.r, 
@@ -217,20 +175,25 @@ def main():
     )
     lora_model = get_peft_model(model, lora_config)
 
-    # Move the model to the device (after initializing LoRA model)
+    # Move the model to the device
     lora_model = lora_model.to(device)
 
     # Preprocessing datasets
     train_ds.set_transform(lambda batch: train_transforms(batch, image_processor, jitter, device))
     test_ds.set_transform(lambda batch: val_transforms(batch, image_processor, jitter, device))
 
+    # Prepare datasets and model for multi-GPU training
+    accelerator = Accelerator()
+    train_ds, test_ds = accelerator.prepare(train_ds, test_ds)
+    model = accelerator.prepare(lora_model)
+
     # Prepare Trainer
     trainer = Trainer(
-        model=lora_model,
+        model=model,
         args=training_args,
         train_dataset=train_ds,
         eval_dataset=test_ds,
-        tokenizer=image_processor,  # Deprecated warning here, but will work
+        tokenizer=None,  # Không cần tokenizer cho ảnh
         data_collator=None,
         compute_metrics=None,  # You can add a metric calculation function here
     )
