@@ -1,8 +1,6 @@
 ## Model training Phao, PyTorch version, Trainer
 
-Based on the script [`train_phao.py`](https://github.com/huggingface/transformers/blob/main/examples/pytorch/semantic-segmentation/run_semantic_segmentation.py).
-
-The script leverages the [🤗 Trainer API](https://huggingface.co/docs/transformers/main_classes/trainer) to automatically take care of the training for you, running on distributed environments right away.
+Based on the script [`train_phao.py`](https://github.com/Xkulll/train_phao/blob/main/train_phao.py).
 
 Here we show how to fine-tune a [SegFormer](https://huggingface.co/nvidia/mit-b0) model on the [segments/sidewalk-semantic](https://huggingface.co/datasets/segments/sidewalk-semantic) dataset:
 
