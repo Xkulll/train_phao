@@ -2,7 +2,7 @@
 
 Based on the script [`train_phao.py`](https://github.com/Xkulll/train_phao/blob/main/train_phao.py).
 
-Here we show how to fine-tune a [SegFormer](https://huggingface.co/nvidia/mit-b0) model on the [segments/sidewalk-semantic](https://huggingface.co/datasets/segments/sidewalk-semantic) dataset:
+Using model [SegFormer](https://huggingface.co/nvidia/mit-b0) model on the [segments/sidewalk-semantic](https://huggingface.co/datasets/segments/sidewalk-semantic) dataset:
 
 In order to use `segments/sidewalk-semantic`: 
  - Log in to Hugging Face with `huggingface-cli login` (token can be accessed [here](https://huggingface.co/settings/tokens)).
